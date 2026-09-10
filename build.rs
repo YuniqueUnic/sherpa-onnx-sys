@@ -1,3 +1,5 @@
+mod archive_layout;
+
 use std::env;
 use std::error::Error;
 use std::ffi::OsStr;
@@ -162,16 +164,13 @@ fn download_prebuilt_libs(
     let is_ios_sim =
         target_os == "ios" && (target_triple.contains("sim") || target_arch == "x86_64");
     let lib_dir_name = if is_ios_sim { "lib-sim" } else { "lib" };
-    let lib_dir = extracted_dir.join(lib_dir_name);
-
-    if lib_dir.is_dir() {
+    if let Some(lib_dir) = archive_layout::find_prebuilt_lib_dir(
+        &extracted_dir,
+        archive_stem,
+        lib_dir_name,
+        android_abi(target_arch),
+    ) {
         return Ok((lib_dir, archive_stem.to_string()));
-    }
-
-    // Android archives use jniLibs/{abi}/ instead of lib/. Check both.
-    let android_lib_dir = extracted_dir.join("jniLibs").join(android_abi(target_arch));
-    if android_lib_dir.is_dir() {
-        return Ok((android_lib_dir, archive_stem.to_string()));
     }
 
     fs::create_dir_all(&cache_root)?;
@@ -243,37 +242,33 @@ fn download_prebuilt_libs(
         .into());
     }
 
-    if !lib_dir.is_dir() {
-        // Android archives use jniLibs/{abi}/ instead of lib/.
-        let android_lib_dir = extracted_dir.join("jniLibs").join(android_abi(target_arch));
-        if android_lib_dir.is_dir() {
-            eprintln!(
-                "Downloaded sherpa-onnx Android libs to {}",
-                android_lib_dir.display()
-            );
-            return Ok((android_lib_dir, archive_stem.to_string()));
-        }
+    if let Some(lib_dir) = archive_layout::find_prebuilt_lib_dir(
+        &extracted_dir,
+        archive_stem,
+        lib_dir_name,
+        android_abi(target_arch),
+    ) {
+        eprintln!("Downloaded sherpa-onnx libs to {}", lib_dir.display());
+        return Ok((lib_dir, archive_stem.to_string()));
+    }
 
-        // iOS archives contain xcframework bundles. Create a lib/ directory
-        // with symlinks so Rust's linker can find the library under the
-        // expected name (libsherpa-onnx-c-api.a / .dylib).
-        if target_os == "ios" {
-            if let Some(ios_lib) = setup_ios_lib_dir(&extracted_dir)? {
+    // iOS archives contain xcframework bundles. Create a lib/ directory
+    // with symlinks so Rust's linker can find the library under the
+    // expected name (libsherpa-onnx-c-api.a / .dylib).
+    if target_os == "ios" {
+        for root in archive_layout::payload_roots(&extracted_dir, archive_stem) {
+            if let Some(ios_lib) = setup_ios_lib_dir(&root)? {
                 eprintln!("Downloaded sherpa-onnx iOS libs to {}", ios_lib.display());
                 return Ok((ios_lib, archive_stem.to_string()));
             }
         }
-
-        return Err(format!(
-            "Downloaded archive did not contain a lib directory: {}",
-            lib_dir.display()
-        )
-        .into());
     }
 
-    eprintln!("Downloaded sherpa-onnx libs to {}", extracted_dir.display());
-
-    Ok((lib_dir, archive_stem.to_string()))
+    Err(format!(
+        "Downloaded archive did not contain a supported library directory under {}",
+        extracted_dir.display()
+    )
+    .into())
 }
 
 /// Map a Rust target architecture to the Android ABI directory name used
