@@ -63,7 +63,7 @@ fn try_main() -> Result<(), DynError> {
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
 
-    if link_mode == LinkMode::Shared && matches!(target_os.as_str(), "linux" | "macos" | "ios") {
+    if link_mode == LinkMode::Shared && matches!(target_os.as_str(), "linux" | "macos" | "ios" | "android") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir.display());
         emit_relative_rpath(&target_os);
         copy_unix_runtime_libs(&lib_dir, &target_os)?;
@@ -161,9 +161,10 @@ fn download_prebuilt_libs(
     // For iOS simulator builds, use a separate lib directory to avoid
     // caching conflicts with device builds.
     let target_triple = env::var("TARGET").unwrap_or_default();
-    let is_ios_sim =
-        target_os == "ios" && (target_triple.contains("sim") || target_arch == "x86_64");
+    let is_ios_sim = target_os == "ios"
+        && (target_triple.contains("sim") || target_arch == "x86_64");
     let lib_dir_name = if is_ios_sim { "lib-sim" } else { "lib" };
+
     if let Some(lib_dir) = archive_layout::find_prebuilt_lib_dir(
         &extracted_dir,
         archive_stem,
@@ -270,6 +271,7 @@ fn download_prebuilt_libs(
     )
     .into())
 }
+
 
 /// Map a Rust target architecture to the Android ABI directory name used
 /// in the prebuilt jniLibs/ layout.
@@ -540,12 +542,32 @@ fn copy_to_tauri_android_jnilibs(
     let dest_dir = tauri_jni_base.join(abi);
 
     // Check if the .so files are already up-to-date.
+    // When archive_stem is None (e.g. SHERPA_ONNX_LIB_DIR or crates.io),
+    // trust whatever is already at dest_dir — don't re-copy.
     let version_file = dest_dir.join(".sherpa-onnx-version");
     if dest_dir.is_dir() {
-        if let Some(stem) = archive_stem {
-            if let Ok(prev) = fs::read_to_string(&version_file) {
-                if prev.trim() == stem {
-                    eprintln!("Skipping Tauri Android .so copy: already up-to-date ({stem})");
+        match archive_stem {
+            Some(stem) => {
+                if let Ok(prev) = fs::read_to_string(&version_file) {
+                    if prev.trim() == stem {
+                        eprintln!("Skipping Tauri Android .so copy: already up-to-date ({stem})");
+                        return Ok(());
+                    }
+                }
+            }
+            None => {
+                // Only skip if dest_dir has at least one .so file;
+                // otherwise proceed with the copy to self-heal partial outputs.
+                let has_so = fs::read_dir(&dest_dir)?
+                    .filter_map(|e| e.ok())
+                    .any(|e| {
+                        e.path()
+                            .file_name()
+                            .and_then(OsStr::to_str)
+                            .map_or(false, |n| n.contains(".so"))
+                    });
+                if has_so {
+                    eprintln!("Skipping Tauri Android .so copy: no archive stem but .so files present");
                     return Ok(());
                 }
             }
@@ -602,15 +624,13 @@ fn copy_xcframework_to_tauri_project(
     archive_stem: Option<&str>,
 ) -> Result<(), DynError> {
     // lib_dir is something like
-    //   target/.../sherpa-onnx-prebuilt/sherpa-onnx-v1.13.7-ios-shared-onnxruntime-static/lib
+    //   target/.../sherpa-onnx-prebuilt/sherpa-onnx-v1.13.8-ios-shared-onnxruntime-static/lib
     // The xcframework sits next to lib/:
     //   .../sherpa-onnx.xcframework/
     let extracted_dir = lib_dir.parent().unwrap_or(lib_dir);
 
     let candidates = [
-        extracted_dir
-            .join("build-ios")
-            .join("sherpa-onnx.xcframework"),
+        extracted_dir.join("build-ios").join("sherpa-onnx.xcframework"),
         extracted_dir.join("sherpa-onnx.xcframework"),
         extracted_dir.join("SherpaOnnxC.xcframework"),
     ];
@@ -618,10 +638,7 @@ fn copy_xcframework_to_tauri_project(
     let xcframework = match candidates.iter().find(|p| p.is_dir()) {
         Some(p) => p,
         None => {
-            eprintln!(
-                "No xcframework found in {}; skipping Tauri iOS copy",
-                extracted_dir.display()
-            );
+            eprintln!("No xcframework found in {}; skipping Tauri iOS copy", extracted_dir.display());
             return Ok(());
         }
     };
@@ -640,10 +657,15 @@ fn copy_xcframework_to_tauri_project(
     let version_file = project_dir.join(".sherpa-onnx-xcframework-version");
 
     // Check if the xcframework is already up-to-date.
+    // When archive_stem is None (e.g. SHERPA_ONNX_LIB_DIR or crates.io),
+    // trust whatever is already at dest — don't delete it.
     let needs_update = if dest.exists() {
-        archive_stem.map_or(true, |stem| {
-            fs::read_to_string(&version_file).map_or(true, |prev| prev.trim() != stem)
-        })
+        match archive_stem {
+            Some(stem) => {
+                fs::read_to_string(&version_file).map_or(true, |prev| prev.trim() != stem)
+            }
+            None => false,
+        }
     } else {
         true
     };
@@ -680,10 +702,10 @@ fn copy_dir_recursively(src: &Path, dst: &Path) -> Result<(), DynError> {
         if ty.is_dir() {
             copy_dir_recursively(&entry.path(), &dest_path)?;
         } else if ty.is_symlink() {
-            let target = fs::read_link(entry.path())?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::symlink;
+                let target = fs::read_link(entry.path())?;
                 symlink(&target, &dest_path)?;
             }
             #[cfg(not(unix))]
@@ -704,9 +726,9 @@ fn copy_unix_runtime_libs(lib_dir: &Path, target_os: &str) -> Result<(), DynErro
         .filter(|path| {
             path.file_name()
                 .and_then(OsStr::to_str)
-                .map(|name| match target_os {
-                    "linux" | "android" => name.contains(".so"),
-                    "macos" | "ios" => name.ends_with(".dylib"),
+                 .map(|name| match target_os {
+                     "linux" | "android" => name.contains(".so"),
+                     "macos" | "ios" => name.ends_with(".dylib"),
                     _ => false,
                 })
                 .unwrap_or(false)
@@ -714,7 +736,11 @@ fn copy_unix_runtime_libs(lib_dir: &Path, target_os: &str) -> Result<(), DynErro
         .collect();
 
     if runtime_libs.is_empty() {
-        return Err(format!("No shared runtime libraries found in {}", lib_dir.display()).into());
+        return Err(format!(
+            "No shared runtime libraries found in {}",
+            lib_dir.display()
+        )
+        .into());
     }
 
     let mut copy_plan = Vec::<(PathBuf, OsString)>::new();
