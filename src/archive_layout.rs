@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 /// Some releases put the platform payload directly at the extraction root, while desktop
 /// tarballs wrap it in a directory named after the archive. Both are valid release layouts.
 pub fn payload_roots(extracted_dir: &Path, archive_stem: &str) -> [PathBuf; 2] {
-    [extracted_dir.to_path_buf(), extracted_dir.join(archive_stem)]
+    [
+        extracted_dir.to_path_buf(),
+        extracted_dir.join(archive_stem),
+    ]
 }
 
 /// Find the linkable platform directory without coupling cache layout to archive layout.

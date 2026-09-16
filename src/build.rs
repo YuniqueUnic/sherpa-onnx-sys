@@ -27,7 +27,6 @@ const SHERPA_ONNX_STATIC_LIBS: &[&str] = &[
     "piper_phonemize",
     "espeak-ng",
     "ucd",
-    "onnxruntime",
     "ssentencepiece_core",
 ];
 

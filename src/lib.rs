@@ -2,7 +2,7 @@
 //!
 //! # Environment variables
 //!
-//! The build script (`build.rs`) recognises the following environment
+//! The build script (`src/build.rs`) recognises the following environment
 //! variables, all of which are optional:
 //!
 //! | Variable | Purpose |
@@ -23,6 +23,19 @@
 #![allow(non_upper_case_globals)]
 
 use std::os::raw::c_char;
+
+// Static Sherpa uses ORT's C API; ort-sys owns the native runtime. An empty
+// feature set also selects static linking, while mobile always uses shared.
+#[cfg(all(
+    not(feature = "shared"),
+    any(target_os = "linux", target_os = "macos", target_os = "windows")
+))]
+use ort_sys as _;
+
+#[cfg(test)]
+mod archive_layout;
+#[cfg(test)]
+mod tests;
 
 extern "C" {
     pub fn SherpaOnnxGetVersionStr() -> *const c_char;

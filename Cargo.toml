@@ -13,11 +13,10 @@
 edition = "2021"
 name = "sherpa-onnx-sys"
 version = "1.13.8"
-build = "build.rs"
+build = "src/build.rs"
 links = "sherpa-onnx"
 include = [
     "src/**",
-    "build.rs",
     "Cargo.toml",
     "README.md",
     "LICENSE*",
@@ -52,9 +51,12 @@ static = []
 name = "sherpa_onnx_sys"
 path = "src/lib.rs"
 
-[[test]]
-name = "archive_layout"
-path = "tests/archive_layout.rs"
+# No features also selects static linking, so this dependency is not optional.
+# The library imports it only for desktop static builds.
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies.ort-sys]
+version = "=2.0.0-rc.13"
+default-features = false
+features = ["api-28", "download-binaries", "tls-native"]
 
 [build-dependencies.bzip2]
 version = "0.4"
