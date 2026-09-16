@@ -424,6 +424,11 @@ fn emit_static_link_directives(target_os: &str) {
 
     match target_os {
         "linux" => {
+            cc::Build::new()
+                .cpp(true)
+                .file("src/compat/glibc_compat.cpp")
+                .compile("ort_glibc_compat");
+
             println!("cargo:rustc-link-lib=dylib=stdc++");
             println!("cargo:rustc-link-lib=dylib=m");
             println!("cargo:rustc-link-lib=dylib=pthread");
