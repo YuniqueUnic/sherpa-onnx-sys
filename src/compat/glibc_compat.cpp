@@ -21,13 +21,13 @@ unsigned long long __isoc23_strtoull(const char *nptr, char **endptr, int base) 
 // In GCC 13 / libstdc++ 13+, _M_replace_cold handles cold replacement paths.
 // In GCC 11 / libstdc++ 11 (Ubuntu 22.04), route to std::basic_string::replace.
 std::__cxx11::basic_string<char>& _ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE15_M_replace_coldEPcmPKcmm(
-    std::__cxx11::basic_string<char>* self, char* p, unsigned long len1, const char* s, unsigned long len2, unsigned long res
+    std::__cxx11::basic_string<char>* self, char* p, unsigned long len1, const char* s, unsigned long len2, unsigned long
 ) {
     return self->replace(p - self->data(), len1, s, len2);
 }
 
 std::__cxx11::basic_string<wchar_t>& _ZNSt7__cxx1112basic_stringIwSt11char_traitsIwESaIwEE15_M_replace_coldEPwmPKwmm(
-    std::__cxx11::basic_string<wchar_t>* self, wchar_t* p, unsigned long len1, const wchar_t* s, unsigned long len2, unsigned long res
+    std::__cxx11::basic_string<wchar_t>* self, wchar_t* p, unsigned long len1, const wchar_t* s, unsigned long len2, unsigned long
 ) {
     return self->replace(p - self->data(), len1, s, len2);
 }
