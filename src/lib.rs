@@ -35,6 +35,8 @@ use ort_sys as _;
 #[cfg(test)]
 mod archive_layout;
 #[cfg(test)]
+mod prebuilt_archive;
+#[cfg(test)]
 mod tests;
 
 extern "C" {

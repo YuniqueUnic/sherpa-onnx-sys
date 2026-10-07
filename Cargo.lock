@@ -938,6 +938,7 @@ name = "sherpa-onnx-sys"
 version = "1.13.8"
 dependencies = [
  "bzip2 0.4.4",
+ "cc",
  "ort-sys",
  "tar",
  "tempfile",

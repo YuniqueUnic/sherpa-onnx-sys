@@ -1,4 +1,7 @@
 mod archive_layout;
+mod prebuilt_archive;
+
+use prebuilt_archive::{archive_name, LinkMode};
 
 use std::env;
 use std::error::Error;
@@ -31,12 +34,6 @@ const SHERPA_ONNX_STATIC_LIBS: &[&str] = &[
 ];
 
 type DynError = Box<dyn Error>;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LinkMode {
-    Static,
-    Shared,
-}
 
 fn main() {
     if let Err(err) = try_main() {
@@ -147,7 +144,8 @@ fn download_prebuilt_libs(
     target_os: &str,
     target_arch: &str,
 ) -> Result<(PathBuf, String), DynError> {
-    let archive_name = archive_name(link_mode, target_os, target_arch)?;
+    let target_features = env::var("CARGO_CFG_TARGET_FEATURE").unwrap_or_default();
+    let archive_name = archive_name(link_mode, target_os, target_arch, &target_features)?;
     let archive_stem = archive_name
         .strip_suffix(".tar.bz2")
         .or_else(|| archive_name.strip_suffix(".xcframework.zip"))
@@ -345,68 +343,6 @@ fn setup_ios_lib_dir(extracted_dir: &Path) -> Result<Option<PathBuf>, DynError> 
     Ok(Some(lib_dir))
 }
 
-fn archive_name(
-    link_mode: LinkMode,
-    target_os: &str,
-    target_arch: &str,
-) -> Result<String, DynError> {
-    let version = env!("CARGO_PKG_VERSION");
-    let name = match (link_mode, target_os, target_arch) {
-        (LinkMode::Static, "linux", "x86_64") => {
-            format!("sherpa-onnx-v{version}-linux-x64-static-lib.tar.bz2")
-        }
-        (LinkMode::Static, "linux", "aarch64") => {
-            format!("sherpa-onnx-v{version}-linux-aarch64-static-lib.tar.bz2")
-        }
-        (LinkMode::Static, "macos", "x86_64") => {
-            format!("sherpa-onnx-v{version}-osx-x64-static-lib.tar.bz2")
-        }
-        (LinkMode::Static, "macos", "aarch64") => {
-            format!("sherpa-onnx-v{version}-osx-arm64-static-lib.tar.bz2")
-        }
-        (LinkMode::Static, "windows", "x86_64") => {
-            format!("sherpa-onnx-v{version}-win-x64-static-MT-Release-lib.tar.bz2")
-        }
-        (LinkMode::Static, "windows", "aarch64") => {
-            format!("sherpa-onnx-v{version}-win-arm64-static-MT-Release-lib.tar.bz2")
-        }
-        (LinkMode::Shared, "linux", "x86_64") => {
-            format!("sherpa-onnx-v{version}-linux-x64-shared-lib.tar.bz2")
-        }
-        (LinkMode::Shared, "linux", "aarch64") => {
-            format!("sherpa-onnx-v{version}-linux-aarch64-shared-cpu-lib.tar.bz2")
-        }
-        (LinkMode::Shared, "macos", "x86_64") => {
-            format!("sherpa-onnx-v{version}-osx-x64-shared-lib.tar.bz2")
-        }
-        (LinkMode::Shared, "macos", "aarch64") => {
-            format!("sherpa-onnx-v{version}-osx-arm64-shared-lib.tar.bz2")
-        }
-        (LinkMode::Shared, "windows", "x86_64") => {
-            format!("sherpa-onnx-v{version}-win-x64-shared-MT-Release-lib.tar.bz2")
-        }
-        (LinkMode::Shared, "windows", "aarch64") => {
-            format!("sherpa-onnx-v{version}-win-arm64-shared-MT-Release-lib.tar.bz2")
-        }
-        // Android: one archive with all ABIs under jniLibs/{abi}/.
-        (LinkMode::Shared, "android", "aarch64" | "arm" | "x86" | "x86_64") => {
-            format!("sherpa-onnx-v{version}-android.tar.bz2")
-        }
-        // iOS: shared xcframework from the xcframework release tag.
-        // The xcframework contains both device (arm64) and simulator
-        // (arm64 + x86_64) slices, so one archive serves all iOS targets.
-        (LinkMode::Shared, "ios", "aarch64" | "x86_64") => {
-            format!("sherpa-onnx-v{version}-ios-shared-onnxruntime-static.xcframework.zip")
-        }
-        _ => return Err(format!(
-            "Unsupported target for sherpa-onnx prebuilt libs: os={target_os}, arch={target_arch}"
-        )
-        .into()),
-    };
-
-    Ok(name)
-}
-
 fn emit_shared_link_directives(target_os: &str) {
     println!("cargo:rustc-link-lib=dylib=sherpa-onnx-c-api");
     // The iOS shared-onnxruntime-static xcframework bundles onnxruntime
@@ -532,7 +468,7 @@ fn copy_to_tauri_android_jnilibs(
     let tauri_jni_base = candidates.iter().find(|p| {
         // Check that the parent (main/) exists, meaning
         // `tauri android init` has been run.
-        p.parent().map_or(false, |p| p.exists())
+        p.parent().is_some_and(Path::exists)
     });
 
     let tauri_jni_base = match tauri_jni_base {
@@ -568,7 +504,7 @@ fn copy_to_tauri_android_jnilibs(
                         e.path()
                             .file_name()
                             .and_then(OsStr::to_str)
-                            .map_or(false, |n| n.contains(".so"))
+                            .is_some_and(|name| name.contains(".so"))
                     });
                 if has_so {
                     eprintln!("Skipping Tauri Android .so copy: no archive stem but .so files present");
